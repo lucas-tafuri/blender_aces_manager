@@ -1,0 +1,21 @@
+schema_version = "1.0.0"
+
+# The extension identifier should match the top-level Python package name
+id = "blender_aces_manager"
+type = "add-on"
+
+name = "Blender ACES Manager"
+version = "1.0.1"
+tagline = "Install and switch between Blender default and ACES color management"
+maintainer = "Lucas Tafuri"
+
+# Blender's Extension Platform is available in Blender 4.2+
+blender_version_min = "4.2.0"
+
+# SPDX license identifier(s)
+license = ["SPDX:MIT"]
+
+
+website = "https://github.com/lucas-tafuri/blender-aces-manager"
+tags = ["color", "ACES", "OCIO", "rendering"]
+

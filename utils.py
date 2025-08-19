@@ -6,6 +6,7 @@ import json
 import shutil
 import zipfile
 import urllib.request
+import urllib.error
 import time
 import subprocess
 import threading
@@ -133,6 +134,221 @@ def download_zip_async(url: str, dest_zip_path: str, progress_callback: Optional
     thread = threading.Thread(target=download_thread, daemon=True)
     thread.start()
 
+
+def _get_addon_module_and_version() -> Tuple[str, Tuple[int, int, int]]:
+    """Return (module_name, version_tuple) for this add-on.
+    Safely imports the package root to read bl_info.
+    """
+    try:
+        # Local import to avoid circulars at module import time
+        from . import __init__ as _addon_root
+        module_name = __package__ or "blender_aces_manager"
+        version = _addon_root.bl_info.get("version", (0, 0, 0))
+        # Normalize to 3-tuple
+        if isinstance(version, (list, tuple)):
+            version_tuple = tuple(int(v) for v in version)[:3]
+            while len(version_tuple) < 3:
+                version_tuple = (*version_tuple, 0)
+        else:
+            version_tuple = (0, 0, 0)
+        return module_name, version_tuple
+    except Exception:
+        return ("blender_aces_manager", (0, 0, 0))
+
+
+def _parse_version_string(version_str: str) -> Tuple[int, int, int]:
+    """Parse versions like '1.2.3' or 'v1.2.3' to a tuple."""
+    try:
+        v = version_str.strip()
+        if v.startswith('v') or v.startswith('V'):
+            v = v[1:]
+        parts = [int(p) for p in v.split('.') if p.isdigit() or (p and p[0].isdigit())]
+        parts = parts[:3]
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts)  # type: ignore[return-value]
+    except Exception:
+        return (0, 0, 0)
+
+
+def _http_get_json(url: str, timeout: float = 10.0) -> Optional[dict]:
+    """GET JSON helper with GitHub-friendly headers."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "blender-aces-manager-updater"
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read().decode('utf-8', errors='ignore')
+            return json.loads(data)
+    except Exception:
+        return None
+
+
+def get_latest_release_info(repo: str = "lucas-tafuri/blender_aces_manager", include_prereleases: bool = False) -> Optional[dict]:
+    """Query GitHub Releases for the latest release.
+
+    Returns a dict with keys: tag, version, name, is_prerelease, asset_url, html_url
+    or None on failure.
+    """
+    # Try the standard latest endpoint first (skips prereleases)
+    if not include_prereleases:
+        data = _http_get_json(f"https://api.github.com/repos/{repo}/releases/latest")
+        if data and isinstance(data, dict) and not data.get("draft", False):
+            assets = data.get("assets") or []
+            asset_url = None
+            for a in assets:
+                name = a.get("name", "") or ""
+                # Prefer a zip asset
+                if name.lower().endswith('.zip'):
+                    asset_url = a.get("browser_download_url")
+                    break
+            # Fallback: source zip from tag
+            if not asset_url and data.get("tag_name"):
+                tag = data["tag_name"]
+                asset_url = f"https://github.com/{repo}/archive/refs/tags/{tag}.zip"
+            return {
+                "tag": data.get("tag_name") or "",
+                "version": data.get("tag_name") or "",
+                "name": data.get("name") or "",
+                "is_prerelease": bool(data.get("prerelease", False)),
+                "asset_url": asset_url,
+                "html_url": data.get("html_url") or ""
+            }
+
+    # Otherwise fetch the release list and pick newest by created_at
+    releases = _http_get_json(f"https://api.github.com/repos/{repo}/releases") or []
+    if not isinstance(releases, list):
+        return None
+    filtered = [r for r in releases if not r.get("draft", False) and (include_prereleases or not r.get("prerelease", False))]
+    if not filtered:
+        return None
+    # Sort by created_at descending
+    filtered.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    data = filtered[0]
+    assets = data.get("assets") or []
+    asset_url = None
+    for a in assets:
+        name = a.get("name", "") or ""
+        if name.lower().endswith('.zip'):
+            asset_url = a.get("browser_download_url")
+            break
+    if not asset_url and data.get("tag_name"):
+        tag = data["tag_name"]
+        asset_url = f"https://github.com/{repo}/archive/refs/tags/{tag}.zip"
+    return {
+        "tag": data.get("tag_name") or "",
+        "version": data.get("tag_name") or "",
+        "name": data.get("name") or "",
+        "is_prerelease": bool(data.get("prerelease", False)),
+        "asset_url": asset_url,
+        "html_url": data.get("html_url") or ""
+    }
+
+
+def check_addon_update(repo: str, include_prereleases: bool = False) -> dict:
+    """Check whether an update is available. Stores result in state and returns it.
+
+    Returns dict with: current_version, latest_version, update_available, asset_url, html_url, checked_at
+    """
+    _module, current_version = _get_addon_module_and_version()
+    info = get_latest_release_info(repo, include_prereleases)
+    result = {
+        "current_version": f"{current_version[0]}.{current_version[1]}.{current_version[2]}",
+        "latest_version": "",
+        "update_available": False,
+        "asset_url": None,
+        "html_url": None,
+        "checked_at": int(time.time()),
+    }
+    if not info:
+        # Persist failure time only
+        state = load_state()
+        state["update"] = result
+        save_state(state)
+        return result
+
+    latest_tuple = _parse_version_string(info.get("version") or "0.0.0")
+    result["latest_version"] = f"{latest_tuple[0]}.{latest_tuple[1]}.{latest_tuple[2]}"
+    result["update_available"] = latest_tuple > current_version
+    result["asset_url"] = info.get("asset_url")
+    result["html_url"] = info.get("html_url")
+
+    state = load_state()
+    state["update"] = result
+    save_state(state)
+    return result
+
+
+def get_cached_update_state() -> dict:
+    state = load_state()
+    return state.get("update", {})
+
+
+def schedule_update_check_once(delay_seconds: float = 3.0) -> None:
+    """Schedule a one-time update check a few seconds after register."""
+    try:
+        def _do_check():
+            try:
+                prefs = get_addon_prefs()
+                repo = getattr(prefs, "update_repo", "lucas-tafuri/blender_aces_manager")
+                include_pre = getattr(prefs, "include_prereleases", False)
+                # Run in background thread to avoid blocking UI
+                def _bg():
+                    try:
+                        check_addon_update(repo, include_pre)
+                    except Exception:
+                        pass
+                t = threading.Thread(target=_bg, daemon=True)
+                t.start()
+            except Exception:
+                pass
+            # Do not repeat
+            return None
+
+        # Defer import to runtime to avoid issues when running outside Blender
+        import bpy as _bpy  # noqa: F401
+        _bpy.app.timers.register(_do_check, first_interval=delay_seconds)
+    except Exception:
+        pass
+
+
+def install_addon_from_zip(zip_url: str, module_name: Optional[str] = None) -> Tuple[bool, str]:
+    """Download a ZIP and install/enable this add-on from it.
+    Returns (ok, message).
+    """
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(tmp_fd)
+        try:
+            # Stream download
+            req = urllib.request.Request(zip_url, headers={"User-Agent": "blender-aces-manager-updater"})
+            with urllib.request.urlopen(req, timeout=60) as resp, open(tmp_path, "wb") as out:
+                shutil.copyfileobj(resp, out)
+        except Exception as e:
+            return False, f"Download failed: {e}"
+
+        try:
+            # Install and enable
+            import bpy as _bpy
+            _bpy.ops.preferences.addon_install(filepath=tmp_path, overwrite=True, target='DEFAULT')
+            if module_name is None:
+                module_name, _v = _get_addon_module_and_version()
+            _bpy.ops.preferences.addon_enable(module=module_name)
+            try:
+                _bpy.ops.wm.save_userpref()
+            except Exception:
+                pass
+        except Exception as e:
+            return False, f"Install failed: {e}"
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        return True, "Add-on updated"
+    except Exception as e:
+        return False, f"Unexpected error: {e}"
 
 def find_config_ocio(root_dir: str) -> Optional[str]:
     # Return directory path that contains a config.ocio

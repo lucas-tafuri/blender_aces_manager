@@ -208,12 +208,66 @@ class BAM_OT_cancel_install(Operator):
         return {'FINISHED'}
 
 
+class BAM_OT_check_update(Operator):
+    bl_idname = "bam.check_update"
+    bl_label = "Check for Updates"
+    bl_description = "Check GitHub Releases for a new version of this add-on"
+
+    def execute(self, context):
+        try:
+            prefs = utils.get_addon_prefs(context)
+            repo = getattr(prefs, "update_repo", "lucas-tafuri/blender_aces_manager")
+            include_pre = getattr(prefs, "include_prereleases", False)
+            result = utils.check_addon_update(repo, include_pre)
+            if result.get("update_available"):
+                self.report({'INFO'}, f"Update available: {result.get('latest_version')}")
+            else:
+                self.report({'INFO'}, "You're up to date")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Update check failed: {e}")
+            return {'CANCELLED'}
+
+
+class BAM_OT_update_addon(Operator):
+    bl_idname = "bam.update_addon"
+    bl_label = "Update Add-on"
+    bl_description = "Download and install the latest release of this add-on"
+
+    def execute(self, context):
+        try:
+            state = utils.get_cached_update_state()
+            asset_url = state.get("asset_url")
+            if not asset_url:
+                # Fallback: force check
+                prefs = utils.get_addon_prefs(context)
+                repo = getattr(prefs, "update_repo", "lucas-tafuri/blender_aces_manager")
+                include_pre = getattr(prefs, "include_prereleases", False)
+                result = utils.check_addon_update(repo, include_pre)
+                asset_url = result.get("asset_url")
+                if not asset_url:
+                    self.report({'ERROR'}, "No downloadable ZIP found in the latest release")
+                    return {'CANCELLED'}
+
+            ok, msg = utils.install_addon_from_zip(asset_url)
+            if ok:
+                self.report({'INFO'}, "Updated. Please restart Blender to ensure everything reloads cleanly.")
+                return {'FINISHED'}
+            self.report({'ERROR'}, msg)
+            return {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Update failed: {e}")
+            return {'CANCELLED'}
+
+
 classes = (
     BAM_OT_install_aces,
     BAM_OT_switch_to_aces,
     BAM_OT_switch_to_default,
     BAM_OT_validate_config,
     BAM_OT_cancel_install,
+    BAM_OT_check_update,
+    BAM_OT_update_addon,
 )
 
 

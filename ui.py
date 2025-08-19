@@ -81,6 +81,26 @@ class BAM_PT_main_panel(Panel):
         prefs_box.prop(prefs, "auto_restart")
         prefs_box.prop(prefs, "aces_repo_preference")
 
+        # Updates section
+        upd_box = layout.box()
+        upd_box.label(text="Add-on Updates")
+        row = upd_box.row(align=True)
+        row.operator("bam.check_update", text="Check for Updates", icon='FILE_REFRESH')
+        row.operator("bam.update_addon", text="Update Now", icon='IMPORT')
+        upd_box.prop(prefs, "auto_check_updates")
+        upd_box.prop(prefs, "include_prereleases")
+        upd_box.prop(prefs, "update_repo")
+
+        # Show current update status
+        state = utils.get_cached_update_state()
+        if state:
+            status_col = upd_box.column(align=True)
+            current = state.get("current_version", "?")
+            latest = state.get("latest_version", "?")
+            available = bool(state.get("update_available"))
+            status_col.label(text=f"Current: {current}  Latest: {latest}")
+            status_col.label(text=("Update available" if available else "Up to date"))
+
 
 classes = (
     BAM_PT_main_panel,

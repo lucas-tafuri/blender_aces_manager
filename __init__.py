@@ -28,11 +28,34 @@ class BAM_AddonPreferences(AddonPreferences):
         default=True,
     )
 
+    auto_check_updates: BoolProperty(
+        name="Auto-Check for Updates",
+        description="Check for updates shortly after enabling Blender",
+        default=True,
+    )
+
+    include_prereleases: BoolProperty(
+        name="Include Pre-releases",
+        description="Consider pre-release versions when checking for updates",
+        default=False,
+    )
+
+    update_repo: StringProperty(
+        name="Update Repo",
+        description="GitHub repo to check for updates (owner/name)",
+        default="lucas-tafuri/blender_aces_manager",
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.label(text="Blender ACES Manager Preferences")
         layout.prop(self, "aces_repo_preference")
         layout.prop(self, "auto_restart")
+        box = layout.box()
+        box.label(text="Updater")
+        box.prop(self, "auto_check_updates")
+        box.prop(self, "include_prereleases")
+        box.prop(self, "update_repo")
 
 
 classes = (
@@ -43,12 +66,20 @@ classes = (
 def register():
     from . import operators as _operators
     from . import ui as _ui
+    from . import utils as _utils
 
     for cls in classes:
         bpy.utils.register_class(cls)
 
     _operators.register()
     _ui.register()
+    # Schedule an update check if enabled
+    try:
+        prefs = _utils.get_addon_prefs()
+        if getattr(prefs, "auto_check_updates", True):
+            _utils.schedule_update_check_once(3.0)
+    except Exception:
+        pass
 
 
 def unregister():

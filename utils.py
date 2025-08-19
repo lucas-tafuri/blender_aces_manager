@@ -203,6 +203,10 @@ def get_latest_release_info(repo: str = "lucas-tafuri/blender_aces_manager", inc
                 if name.lower().endswith('.zip'):
                     asset_url = a.get("browser_download_url")
                     break
+            # If no explicit asset, fallback to tag source zip
+            if not asset_url and data.get("tag_name"):
+                tag = data["tag_name"]
+                asset_url = f"https://github.com/{repo}/archive/refs/tags/{tag}.zip"
             return {
                 "tag": data.get("tag_name") or "",
                 "version": data.get("tag_name") or "",
@@ -229,7 +233,10 @@ def get_latest_release_info(repo: str = "lucas-tafuri/blender_aces_manager", inc
         if name.lower().endswith('.zip'):
             asset_url = a.get("browser_download_url")
             break
-    # Do not fallback to tag source ZIP to avoid invalid module folder names
+    # Fallback to tag source ZIP if no explicit assets; repack will fix top-level folder name
+    if not asset_url and data.get("tag_name"):
+        tag = data["tag_name"]
+        asset_url = f"https://github.com/{repo}/archive/refs/tags/{tag}.zip"
     return {
         "tag": data.get("tag_name") or "",
         "version": data.get("tag_name") or "",
@@ -322,11 +329,19 @@ def install_addon_from_zip(zip_url: str, module_name: Optional[str] = None) -> T
         except Exception as e:
             return False, f"Download failed: {e}"
 
-        # Ensure the zip has a valid top-level folder named blender_aces_manager
+        # Ensure the zip has a valid top-level folder named blender_aces_manager,
+        # and detect if this is a Blender Extension (blender_manifest.toml).
         zip_for_install = tmp_path
+        is_extension_package = False
         try:
             with zipfile.ZipFile(tmp_path, 'r') as zf:
                 names = zf.namelist()
+                # Detect extension manifest
+                for n in names:
+                    base = n.rsplit('/', 1)[-1]
+                    if base == 'blender_manifest.toml':
+                        is_extension_package = True
+                        break
                 # Determine top-level entries
                 top_levels = set()
                 for n in names:
@@ -364,17 +379,48 @@ def install_addon_from_zip(zip_url: str, module_name: Optional[str] = None) -> T
         try:
             # Install and enable
             import bpy as _bpy
-            _bpy.ops.preferences.addon_install(filepath=zip_for_install, overwrite=True, target='DEFAULT')
-            # Try enabling canonical module name first
+            enable_ok = False
+            # Choose installer based on presence of extension manifest and operator availability
+            used_extension_ops = False
+            try:
+                if is_extension_package and hasattr(_bpy.ops.preferences, 'extension_install'):
+                    _bpy.ops.preferences.extension_install(filepath=zip_for_install, overwrite=True)
+                    used_extension_ops = True
+                else:
+                    _bpy.ops.preferences.addon_install(filepath=zip_for_install, overwrite=True, target='DEFAULT')
+            except Exception:
+                # Fallback to addon_install if extension_install failed or is unavailable
+                try:
+                    _bpy.ops.preferences.addon_install(filepath=zip_for_install, overwrite=True, target='DEFAULT')
+                except Exception as e:
+                    return False, f"Install failed: {e}"
+
+            # Try enabling using the appropriate operator(s)
             if module_name is None:
                 module_name, _v = _get_addon_module_and_version()
-            enable_ok = False
+            # 1) Try as legacy add-on module
             try:
                 _bpy.ops.preferences.addon_enable(module=module_name)
                 enable_ok = True
             except Exception:
-                # Fallback: scan addon dirs and attempt to enable any module starting with base name
+                pass
+            # 2) Try extension enable if available
+            if not enable_ok and hasattr(_bpy.ops.preferences, 'extension_enable'):
+                try:
+                    # Try both plain name and the qualified bl_ext path
+                    _bpy.ops.preferences.extension_enable(module=module_name)
+                    enable_ok = True
+                except Exception:
+                    try:
+                        qualified = f"bl_ext.user_default.{module_name}"
+                        _bpy.ops.preferences.extension_enable(module=qualified)
+                        enable_ok = True
+                    except Exception:
+                        pass
+            # 3) Last resort: scan known addons and extensions keys
+            if not enable_ok:
                 base = module_name.split('.')[0]
+                # Legacy add-ons
                 try:
                     for mod_name in list(_bpy.context.preferences.addons.keys()):
                         if mod_name == base or mod_name.startswith(base):
@@ -386,14 +432,22 @@ def install_addon_from_zip(zip_url: str, module_name: Optional[str] = None) -> T
                                 pass
                 except Exception:
                     pass
+                # Extensions also show as modules under bl_ext.*; try enabling by qualified name
+                if not enable_ok and hasattr(_bpy.ops.preferences, 'extension_enable'):
+                    try:
+                        _bpy.ops.preferences.extension_enable(module=f"bl_ext.user_default.{base}")
+                        enable_ok = True
+                    except Exception:
+                        pass
+
             try:
                 _bpy.ops.wm.save_userpref()
             except Exception:
                 pass
             if not enable_ok:
-                return False, "Installed, but could not enable the add-on automatically. Please enable it in Preferences."
+                return False, "Installed, but could not enable the add-on automatically. Please enable it in Preferences/Extensions."
         except Exception as e:
-            return False, f"Install failed: {e}"
+            return False, f"Enable failed: {e}"
         finally:
             try:
                 if zip_for_install != tmp_path and os.path.exists(zip_for_install):

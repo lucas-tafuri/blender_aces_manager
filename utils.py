@@ -199,14 +199,10 @@ def get_latest_release_info(repo: str = "lucas-tafuri/blender_aces_manager", inc
             asset_url = None
             for a in assets:
                 name = a.get("name", "") or ""
-                # Prefer a zip asset
+                # Prefer a zip asset that looks like an add-on package
                 if name.lower().endswith('.zip'):
                     asset_url = a.get("browser_download_url")
                     break
-            # Fallback: source zip from tag
-            if not asset_url and data.get("tag_name"):
-                tag = data["tag_name"]
-                asset_url = f"https://github.com/{repo}/archive/refs/tags/{tag}.zip"
             return {
                 "tag": data.get("tag_name") or "",
                 "version": data.get("tag_name") or "",
@@ -233,9 +229,7 @@ def get_latest_release_info(repo: str = "lucas-tafuri/blender_aces_manager", inc
         if name.lower().endswith('.zip'):
             asset_url = a.get("browser_download_url")
             break
-    if not asset_url and data.get("tag_name"):
-        tag = data["tag_name"]
-        asset_url = f"https://github.com/{repo}/archive/refs/tags/{tag}.zip"
+    # Do not fallback to tag source ZIP to avoid invalid module folder names
     return {
         "tag": data.get("tag_name") or "",
         "version": data.get("tag_name") or "",
@@ -328,20 +322,84 @@ def install_addon_from_zip(zip_url: str, module_name: Optional[str] = None) -> T
         except Exception as e:
             return False, f"Download failed: {e}"
 
+        # Ensure the zip has a valid top-level folder named blender_aces_manager
+        zip_for_install = tmp_path
+        try:
+            with zipfile.ZipFile(tmp_path, 'r') as zf:
+                names = zf.namelist()
+                # Determine top-level entries
+                top_levels = set()
+                for n in names:
+                    if not n or n.startswith("__MACOSX/"):
+                        continue
+                    parts = n.split('/')
+                    if parts:
+                        top_levels.add(parts[0])
+                # If there is exactly one top-level and it's not the desired folder, repack
+                if len(top_levels) == 1:
+                    top = next(iter(top_levels))
+                    desired = 'blender_aces_manager'
+                    if top != desired:
+                        # Extract then re-zip under the desired folder name
+                        work_dir = tempfile.mkdtemp(prefix="bam_repack_")
+                        extract_dir = os.path.join(work_dir, "extract")
+                        out_dir = os.path.join(work_dir, desired)
+                        os.makedirs(extract_dir, exist_ok=True)
+                        zf.extractall(extract_dir)
+                        # Move contents from the single top folder into out_dir
+                        src_root = os.path.join(extract_dir, top)
+                        shutil.copytree(src_root, out_dir)
+                        repacked = os.path.join(work_dir, "repacked.zip")
+                        with zipfile.ZipFile(repacked, 'w', zipfile.ZIP_DEFLATED) as zout:
+                            for root, _dirs, files in os.walk(out_dir):
+                                for f in files:
+                                    full = os.path.join(root, f)
+                                    arc = os.path.relpath(full, work_dir)
+                                    zout.write(full, arcname=arc)
+                        zip_for_install = repacked
+        except Exception:
+            # If inspection/repack fails, proceed with original zip and hope it's valid
+            pass
+
         try:
             # Install and enable
             import bpy as _bpy
-            _bpy.ops.preferences.addon_install(filepath=tmp_path, overwrite=True, target='DEFAULT')
+            _bpy.ops.preferences.addon_install(filepath=zip_for_install, overwrite=True, target='DEFAULT')
+            # Try enabling canonical module name first
             if module_name is None:
                 module_name, _v = _get_addon_module_and_version()
-            _bpy.ops.preferences.addon_enable(module=module_name)
+            enable_ok = False
+            try:
+                _bpy.ops.preferences.addon_enable(module=module_name)
+                enable_ok = True
+            except Exception:
+                # Fallback: scan addon dirs and attempt to enable any module starting with base name
+                base = module_name.split('.')[0]
+                try:
+                    for mod_name in list(_bpy.context.preferences.addons.keys()):
+                        if mod_name == base or mod_name.startswith(base):
+                            try:
+                                _bpy.ops.preferences.addon_enable(module=mod_name)
+                                enable_ok = True
+                                break
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             try:
                 _bpy.ops.wm.save_userpref()
             except Exception:
                 pass
+            if not enable_ok:
+                return False, "Installed, but could not enable the add-on automatically. Please enable it in Preferences."
         except Exception as e:
             return False, f"Install failed: {e}"
         finally:
+            try:
+                if zip_for_install != tmp_path and os.path.exists(zip_for_install):
+                    os.remove(zip_for_install)
+            except Exception:
+                pass
             try:
                 os.remove(tmp_path)
             except Exception:

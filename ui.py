@@ -20,6 +20,10 @@ def _get_debug_info() -> str:
     if ocio_path:
         info += f" | OCIO: {ocio_path}"
     info += f" | ACES Installed: {'Yes' if aces_installed else 'No'}"
+    if aces_installed:
+        aces_ver = utils.get_installed_aces_version()
+        if aces_ver:
+            info += f" | ACES Version: {aces_ver}"
     
     return info
 

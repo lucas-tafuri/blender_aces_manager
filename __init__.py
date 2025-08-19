@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Blender ACES Manager",
     "author": "Lucas Tafuri",
-    "version": (1, 0, 4),
+    "version": (1, 0, 5),
     "blender": (3, 0, 0),
     "location": "Render Properties > ACES Switcher",
     "description": "Download and switch between Blender default color management and ACES (with auto-restart)",

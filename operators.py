@@ -236,22 +236,28 @@ class BAM_OT_update_addon(Operator):
 
     def execute(self, context):
         try:
-            state = utils.get_cached_update_state()
+            # Ensure we actually need an update
+            prefs = utils.get_addon_prefs(context)
+            repo = getattr(prefs, "update_repo", "lucas-tafuri/blender_aces_manager")
+            include_pre = getattr(prefs, "include_prereleases", False)
+            state = utils.check_addon_update(repo, include_pre)
+            if not state.get("update_available"):
+                self.report({'INFO'}, "Already up to date")
+                return {'CANCELLED'}
+
             asset_url = state.get("asset_url")
             if not asset_url:
-                # Fallback: force check
-                prefs = utils.get_addon_prefs(context)
-                repo = getattr(prefs, "update_repo", "lucas-tafuri/blender_aces_manager")
-                include_pre = getattr(prefs, "include_prereleases", False)
-                result = utils.check_addon_update(repo, include_pre)
-                asset_url = result.get("asset_url")
-                if not asset_url:
-                    self.report({'ERROR'}, "No downloadable ZIP found in the latest release")
-                    return {'CANCELLED'}
+                self.report({'ERROR'}, "No downloadable ZIP found in the latest release")
+                return {'CANCELLED'}
 
             ok, msg = utils.install_addon_from_zip(asset_url)
             if ok:
-                self.report({'INFO'}, "Updated. Please restart Blender to ensure everything reloads cleanly.")
+                # Auto-restart and reopen current file
+                try:
+                    utils.restart_blender_with_same_file()
+                except Exception:
+                    pass
+                self.report({'INFO'}, "Updated and restarting Blender...")
                 return {'FINISHED'}
             self.report({'ERROR'}, msg)
             return {'CANCELLED'}

@@ -5,7 +5,7 @@ id = "blender_aces_manager"
 type = "add-on"
 
 name = "Blender ACES Manager"
-version = "1.0.4"
+version = "1.0.5"
 tagline = "Install and switch between Blender default and ACES color management"
 maintainer = "Lucas Tafuri"
 

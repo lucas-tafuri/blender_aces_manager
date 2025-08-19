@@ -612,6 +612,30 @@ def is_aces_installed() -> bool:
     return os.path.isfile(get_aces_config_path())
 
 
+def get_installed_aces_version() -> str:
+    """Try to read a version-like string from the installed ACES config.
+    Falls back to "unknown" if not found.
+    """
+    try:
+        config_path = get_aces_config_path()
+        if not os.path.isfile(config_path):
+            return "not installed"
+        # Heuristic: look for version lines near the top
+        with open(config_path, 'r', encoding='utf-8', errors='ignore') as f:
+            head = f.read(4096)
+        # Common hints: a comment with version, or a config name containing a version
+        for marker in ("ACES", "version", "Version", "ACEScg", "cg-config", "OCIO", "ocio_profile_version"):
+            if marker in head:
+                # Extract a simple version-like token
+                import re
+                m = re.search(r"(\b\d+\.\d+(?:\.\d+)?\b)", head)
+                if m:
+                    return m.group(1)
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
 def get_blender_version_info() -> str:
     """Get Blender version as a string for display purposes."""
     version = bpy.app.version

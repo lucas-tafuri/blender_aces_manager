@@ -266,6 +266,67 @@ class BAM_OT_update_addon(Operator):
             return {'CANCELLED'}
 
 
+class BAM_OT_uninstall_aces(Operator):
+    bl_idname = "bam.uninstall_aces"
+    bl_label = "Uninstall ACES"
+    bl_description = "Remove the installed ACES configuration"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        try:
+            # Check if currently using ACES
+            if utils.is_using_aces():
+                self.report({'ERROR'}, "Cannot uninstall ACES while it's active. Switch to default first.")
+                return {'CANCELLED'}
+
+            # Confirm uninstallation
+            ok = self.confirm_uninstall()
+            if not ok:
+                return {'CANCELLED'}
+
+            # Perform uninstallation
+            success, message = utils.uninstall_aces()
+            if success:
+                self.report({'INFO'}, message)
+                return {'FINISHED'}
+            else:
+                self.report({'ERROR'}, message)
+                return {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Uninstall failed: {e}")
+            return {'CANCELLED'}
+
+    def confirm_uninstall(self) -> bool:
+        """Show confirmation dialog for uninstallation."""
+        try:
+            import bpy
+            return bpy.ops.bam.confirm_uninstall_aces('INVOKE_DEFAULT')
+        except Exception:
+            # Fallback: assume yes for non-interactive environments
+            return True
+
+
+class BAM_OT_confirm_uninstall_aces(Operator):
+    bl_idname = "bam.confirm_uninstall_aces"
+    bl_label = "Confirm Uninstall ACES"
+    bl_description = "Confirm removal of ACES configuration"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="This will remove the ACES configuration from:")
+        layout.label(text=f"{utils.get_aces_dir()}")
+        layout.label(text="")
+        layout.label(text="Are you sure you want to continue?")
+        layout.label(text="This action cannot be undone.")
+
+
 classes = (
     BAM_OT_install_aces,
     BAM_OT_switch_to_aces,
@@ -274,6 +335,8 @@ classes = (
     BAM_OT_cancel_install,
     BAM_OT_check_update,
     BAM_OT_update_addon,
+    BAM_OT_uninstall_aces,
+    BAM_OT_confirm_uninstall_aces,
 )
 
 

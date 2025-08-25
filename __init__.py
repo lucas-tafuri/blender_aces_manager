@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Blender ACES Manager",
     "author": "Lucas Tafuri",
-    "version": (1, 0, 5),
+    "version": (1, 0, 7),
     "blender": (3, 0, 0),
     "location": "Render Properties > ACES Switcher",
     "description": "Download and switch between Blender default color management and ACES (with auto-restart)",
@@ -71,6 +71,13 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
+    # Add scene property for advanced options toggle
+    bpy.types.Scene.bam_show_advanced = BoolProperty(
+        name="Show Advanced Options",
+        description="Show advanced options and technical details",
+        default=False
+    )
+
     _operators.register()
     _ui.register()
     # Schedule an update check if enabled
@@ -91,6 +98,10 @@ def unregister():
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+
+    # Remove scene property
+    if hasattr(bpy.types.Scene, "bam_show_advanced"):
+        del bpy.types.Scene.bam_show_advanced
 
 
 if __name__ == "__main__":

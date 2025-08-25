@@ -140,20 +140,48 @@ def _get_addon_module_and_version() -> Tuple[str, Tuple[int, int, int]]:
     Safely imports the package root to read bl_info.
     """
     try:
-        # Local import to avoid circulars at module import time
-        from . import __init__ as _addon_root
+        # Try multiple approaches to get the version
         module_name = __package__ or "blender_aces_manager"
-        version = _addon_root.bl_info.get("version", (0, 0, 0))
+        version = (1, 0, 7)  # Hardcoded fallback version
+        
+        # Method 1: Try direct import
+        try:
+            from . import __init__ as _addon_root
+            version = _addon_root.bl_info.get("version", (1, 0, 7))
+        except Exception:
+            pass
+        
+        # Method 2: Try importing by name if method 1 fails
+        if version == (0, 0, 0):
+            try:
+                import importlib
+                _addon_root = importlib.import_module("blender_aces_manager.__init__")
+                version = _addon_root.bl_info.get("version", (1, 0, 7))
+            except Exception:
+                pass
+        
+        # Method 3: Try to get from sys.modules if already loaded
+        if version == (0, 0, 0):
+            try:
+                import sys
+                if "blender_aces_manager" in sys.modules:
+                    _addon_root = sys.modules["blender_aces_manager"]
+                    if hasattr(_addon_root, 'bl_info'):
+                        version = _addon_root.bl_info.get("version", (1, 0, 7))
+            except Exception:
+                pass
+        
         # Normalize to 3-tuple
         if isinstance(version, (list, tuple)):
             version_tuple = tuple(int(v) for v in version)[:3]
             while len(version_tuple) < 3:
                 version_tuple = (*version_tuple, 0)
         else:
-            version_tuple = (0, 0, 0)
+            version_tuple = (1, 0, 7)  # Default to current version
+            
         return module_name, version_tuple
     except Exception:
-        return ("blender_aces_manager", (0, 0, 0))
+        return ("blender_aces_manager", (1, 0, 7))
 
 
 def _parse_version_string(version_str: str) -> Tuple[int, int, int]:
@@ -1009,5 +1037,41 @@ def delete_user_env_var_windows(name: str) -> None:
     subprocess.run(["reg", "delete", "HKCU\\Environment", "/V", name, "/F"],
                    shell=True, check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def uninstall_aces() -> Tuple[bool, str]:
+    """
+    Remove the installed ACES configuration.
+
+    Returns (success, message)
+    """
+    try:
+        aces_dir = get_aces_dir()
+
+        # Check if ACES is currently active
+        if is_using_aces():
+            return False, "Cannot uninstall ACES while it's active. Switch to default first."
+
+        # Check if ACES is installed
+        if not is_aces_installed():
+            return False, "ACES is not installed"
+
+        # Remove the ACES directory and all its contents
+        if os.path.exists(aces_dir):
+            try:
+                shutil.rmtree(aces_dir)
+            except Exception as e:
+                return False, f"Failed to remove ACES directory: {e}"
+
+        # Clear any cached state
+        state = load_state()
+        if "aces" in state:
+            del state["aces"]
+        save_state(state)
+
+        return True, "ACES configuration successfully uninstalled"
+
+    except Exception as e:
+        return False, f"Unexpected error during uninstall: {e}"
 
 

@@ -142,34 +142,46 @@ def _get_addon_module_and_version() -> Tuple[str, Tuple[int, int, int]]:
     try:
         # Try multiple approaches to get the version
         module_name = __package__ or "blender_aces_manager"
-        version = (1, 0, 7)  # Hardcoded fallback version
+        version = None  # Start with None to indicate no version found yet
         
         # Method 1: Try direct import
         try:
             from . import __init__ as _addon_root
-            version = _addon_root.bl_info.get("version", (1, 0, 7))
+            if hasattr(_addon_root, 'bl_info') and 'version' in _addon_root.bl_info:
+                version = _addon_root.bl_info["version"]
+                pass
         except Exception:
             pass
         
         # Method 2: Try importing by name if method 1 fails
-        if version == (0, 0, 0):
+        if version is None:
             try:
                 import importlib
                 _addon_root = importlib.import_module("blender_aces_manager.__init__")
-                version = _addon_root.bl_info.get("version", (1, 0, 7))
+                if hasattr(_addon_root, 'bl_info') and 'version' in _addon_root.bl_info:
+                    version = _addon_root.bl_info["version"]
+                    pass
             except Exception:
                 pass
         
         # Method 3: Try to get from sys.modules if already loaded
-        if version == (0, 0, 0):
+        if version is None:
             try:
                 import sys
                 if "blender_aces_manager" in sys.modules:
                     _addon_root = sys.modules["blender_aces_manager"]
-                    if hasattr(_addon_root, 'bl_info'):
-                        version = _addon_root.bl_info.get("version", (1, 0, 7))
+                    if hasattr(_addon_root, 'bl_info') and 'version' in _addon_root.bl_info:
+                        version = _addon_root.bl_info["version"]
+                        pass
+                else:
+                    pass
             except Exception:
                 pass
+        
+        # If no version found, use fallback
+        if version is None:
+            version = (1, 0, 8)
+
         
         # Normalize to 3-tuple
         if isinstance(version, (list, tuple)):
@@ -177,11 +189,13 @@ def _get_addon_module_and_version() -> Tuple[str, Tuple[int, int, int]]:
             while len(version_tuple) < 3:
                 version_tuple = (*version_tuple, 0)
         else:
-            version_tuple = (1, 0, 7)  # Default to current version
+            version_tuple = (1, 0, 8)  # Default to current version
+        
+
             
         return module_name, version_tuple
     except Exception:
-        return ("blender_aces_manager", (1, 0, 7))
+        return ("blender_aces_manager", (1, 0, 8))
 
 
 def _parse_version_string(version_str: str) -> Tuple[int, int, int]:
@@ -194,6 +208,9 @@ def _parse_version_string(version_str: str) -> Tuple[int, int, int]:
         parts = parts[:3]
         while len(parts) < 3:
             parts.append(0)
+        
+
+        
         return tuple(parts)  # type: ignore[return-value]
     except Exception:
         return (0, 0, 0)
@@ -281,6 +298,9 @@ def check_addon_update(repo: str, include_prereleases: bool = False) -> dict:
     Returns dict with: current_version, latest_version, update_available, asset_url, html_url, checked_at
     """
     _module, current_version = _get_addon_module_and_version()
+    
+    
+    
     info = get_latest_release_info(repo, include_prereleases)
     result = {
         "current_version": f"{current_version[0]}.{current_version[1]}.{current_version[2]}",
@@ -299,6 +319,9 @@ def check_addon_update(repo: str, include_prereleases: bool = False) -> dict:
 
     latest_tuple = _parse_version_string(info.get("version") or "0.0.0")
     result["latest_version"] = f"{latest_tuple[0]}.{latest_tuple[1]}.{latest_tuple[2]}"
+    
+
+    
     result["update_available"] = latest_tuple > current_version
     result["asset_url"] = info.get("asset_url")
     result["html_url"] = info.get("html_url")

@@ -24,7 +24,7 @@ def _get_current_status_text() -> str:
 def _get_version_info() -> dict:
     """Get all version information."""
     # Plugin version - hardcoded since dynamic detection isn't working in Blender
-    plugin_ver_str = "1.0.7"
+    plugin_ver_str = "1.0.8"
 
     try:
         # ACES version
